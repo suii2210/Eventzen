@@ -1,6 +1,9 @@
 import { Calendar, MapPin, Ticket } from 'lucide-react';
 import type { Event } from '../lib/types';
 
+const stripHtml = (value: string | undefined) =>
+  value ? value.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim() : "";
+
 interface EventsSectionProps {
   events: Event[];
   onEventClick: (event: Event) => void;
@@ -62,7 +65,9 @@ export function EventsSection({ events, onEventClick, location }: EventsSectionP
                 <h3 className="text-xl font-bold text-gray-900 mb-2 group-hover:text-orange-600 transition-colors">
                   {event.title}
                 </h3>
-                <p className="text-gray-600 text-sm mb-4 line-clamp-2">{event.description}</p>
+                <p className="text-gray-600 text-sm mb-4 line-clamp-2">
+                  {stripHtml(event.summary || event.description)}
+                </p>
 
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm text-gray-600">
@@ -89,7 +94,7 @@ export function EventsSection({ events, onEventClick, location }: EventsSectionP
 
                 <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
                   <span className="text-2xl font-bold text-gray-900">
-                    ${event.ticket_price.toFixed(2)}
+                    {(event.ticket_currency ?? "USD")} {event.ticket_price.toFixed(2)}
                   </span>
                   <button className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors">
                     Get Tickets

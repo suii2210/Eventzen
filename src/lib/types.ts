@@ -8,21 +8,45 @@ export interface User {
   created_at?: string;
 }
 
+export type TicketType = 'free' | 'paid' | 'seat';
+export type TicketStatus = 'draft' | 'active' | 'archived';
+
+export interface TicketSku {
+  id: string;
+  eventId: string;
+  name: string;
+  type: TicketType;
+  priceCents: number;
+  price: number;
+  currency: string;
+  feeAbsorb: boolean;
+  qtyTotal: number;
+  qtySold: number;
+  salesStart?: string;
+  salesEnd?: string;
+  perOrderLimit: number;
+  status: TicketStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Event {
   id: string;
-  organizer_id: string;
   title: string;
   description: string;
+  summary?: string;
   category: string;
   location: string;
   image_url?: string;
   start_date: string;
   end_date: string;
   ticket_price: number;
+  ticket_currency?: string;
   total_tickets: number;
   available_tickets: number;
-  created_at: string;
-  updated_at: string;
+  organized_by?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Booking {

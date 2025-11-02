@@ -1,11 +1,19 @@
 import express from "express";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import Event from "../models/Event.js";
 import Booking from "../models/Booking.js";
 import User from "../models/User.js";
+import Ticket from "../models/Ticket.js";
 import OpenAI from "openai"; // optional if you plan to use real AI
 
 const router = express.Router();
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
 
 // 🧩 Optional: initialize OpenAI (only if you plan to enable real AI generation)
 const openai = process.env.OPENAI_API_KEY
@@ -159,42 +167,75 @@ router.get("/", async (req, res) => {
     console.log(`Published events in database: ${publishedEvents}`);
 
     const events = await Event.find(query)
-      .populate('createdBy', 'full_name email')
+      .populate("createdBy", "full_name email")
       .sort({ createdAt: -1 });
-    
-    console.log(`Found ${events.length} events matching query`);
-    if (events.length > 0) {
-      console.log('First event:', {
-        id: events[0]._id,
-        title: events[0].title,
-        status: events[0].status,
-        tickets: events[0].tickets?.length || 0
-      });
+
+    const eventIds = events.map((event) => event._id);
+    const ticketSummaryMap = new Map();
+
+    if (eventIds.length > 0) {
+      const ticketStats = await Ticket.aggregate([
+        {
+          $match: {
+            eventId: { $in: eventIds },
+            status: { $ne: "archived" },
+          },
+        },
+        {
+          $group: {
+            _id: "$eventId",
+            minPrice: { $min: "$priceCents" },
+            totalQty: { $sum: "$qtyTotal" },
+            soldQty: { $sum: "$qtySold" },
+            currencies: { $addToSet: "$currency" },
+          },
+        },
+      ]);
+
+      for (const stat of ticketStats) {
+        const key = stat._id.toString();
+        ticketSummaryMap.set(key, {
+          minPrice: stat.minPrice ?? 0,
+          totalQty: stat.totalQty ?? 0,
+          soldQty: stat.soldQty ?? 0,
+          currency: Array.isArray(stat.currencies) && stat.currencies.length > 0 ? stat.currencies[0] : "USD",
+        });
+      }
     }
-    
-    // Transform events to match frontend expected format
-    const transformedEvents = events.map(event => ({
-      id: event._id.toString(),
-      title: event.title,
-      description: event.description,
-      summary: event.summary,
-      category: event.category || "General",
-      location: event.location,
-      image_url: event.image_url,
-      start_date: event.date ? `${event.date}T${event.startTime || event.time || "00:00:00"}` : new Date().toISOString(),
-      end_date: event.date ? `${event.date}T${event.endTime || event.time || "23:59:59"}` : new Date().toISOString(),
-      ticket_price: event.tickets && event.tickets.length > 0 ? event.tickets[0].price : event.ticket_price || 0,
-      total_tickets: event.tickets && event.tickets.length > 0 ? 
-        event.tickets.reduce((total, ticket) => total + ticket.quantity, 0) : 
-        event.total_tickets || 0,
-      available_tickets: event.tickets && event.tickets.length > 0 ? 
-        event.tickets.reduce((total, ticket) => total + (ticket.quantity - ticket.sold), 0) : 
-        event.available_tickets || 0,
-      organized_by: event.createdBy?.full_name || "Unknown",
-      created_at: event.createdAt,
-      updated_at: event.updatedAt,
-      tickets: event.tickets || []
-    }));
+
+    const transformedEvents = events.map((event) => {
+      const summary = ticketSummaryMap.get(event._id.toString()) || {
+        minPrice: event.ticket_price ? Math.round(event.ticket_price * 100) : 0,
+        totalQty: event.total_tickets || 0,
+        soldQty: event.total_tickets ? (event.total_tickets - (event.available_tickets || 0)) : 0,
+        currency: "USD",
+      };
+
+      const available = Math.max(summary.totalQty - summary.soldQty, 0);
+
+      return {
+        id: event._id.toString(),
+        title: event.title,
+        description: event.description,
+        summary: event.summary,
+        category: event.category || "General",
+        location: event.location,
+        image_url: event.image_url,
+        start_date: event.date
+          ? `${event.date}T${event.startTime || event.time || "00:00:00"}`
+          : new Date().toISOString(),
+        end_date: event.date
+          ? `${event.date}T${event.endTime || event.time || "23:59:59"}`
+          : new Date().toISOString(),
+        ticket_price: (summary.minPrice || 0) / 100,
+        ticket_currency: summary.currency,
+        total_tickets: summary.totalQty,
+        available_tickets: available,
+        organized_by: event.createdBy?.full_name || "Unknown",
+        created_at: event.createdAt,
+        updated_at: event.updatedAt,
+      };
+    });
 
     res.json({ events: transformedEvents });
   } catch (error) {
@@ -204,49 +245,15 @@ router.get("/", async (req, res) => {
 });
 
 /**
- * PUT /api/events/:id/tickets
- * Add tickets to an event (before publishing)
+ * Legacy endpoint retained for backward compatibility messaging.
  */
-router.put("/:id/tickets", async (req, res) => {
-  try {
-    const { tickets } = req.body;
-    
-    if (!tickets || !Array.isArray(tickets) || tickets.length === 0) {
-      return res.status(400).json({ error: "Tickets array is required." });
-    }
-
-    const event = await Event.findById(req.params.id);
-    if (!event) {
-      return res.status(404).json({ error: "Event not found." });
-    }
-
-    // Validate tickets
-    for (let ticket of tickets) {
-      if (!ticket.name || ticket.price === undefined || ticket.quantity === undefined) {
-        return res.status(400).json({ error: "Each ticket must have name, price, and quantity." });
-      }
-      if (ticket.quantity <= 0) {
-        return res.status(400).json({ error: "Ticket quantity must be greater than 0." });
-      }
-    }
-
-    event.tickets = tickets;
-    // Update backward compatibility fields
-    event.total_tickets = tickets.reduce((total, ticket) => total + ticket.quantity, 0);
-    event.ticket_price = tickets.length > 0 ? tickets[0].price : 0;
-    event.available_tickets = tickets.reduce((total, ticket) => total + ticket.quantity, 0);
-
-    await event.save();
-
-    res.json({
-      message: "✅ Tickets added successfully!",
-      event,
-    });
-  } catch (error) {
-    console.error("Error adding tickets:", error);
-    res.status(500).json({ error: error.message });
-  }
+router.put("/:id/tickets", async (_req, res) => {
+  res.status(410).json({
+    error: "This endpoint has been replaced. Use POST /api/events/:id/tickets to create ticket SKUs.",
+  });
 });
+
+
 
 /**
  * PUT /api/events/:id/publish
@@ -263,8 +270,14 @@ router.put("/:id/publish", async (req, res) => {
       return res.status(400).json({ error: "Event is already published." });
     }
 
-    if (!event.tickets || event.tickets.length === 0) {
-      return res.status(400).json({ error: "Cannot publish event without tickets." });
+    const hasActiveTickets = await Ticket.exists({
+      eventId: event._id,
+      status: "active",
+      $expr: { $gt: ["$qtyTotal", "$qtySold"] },
+    });
+
+    if (!hasActiveTickets) {
+      return res.status(400).json({ error: "Cannot publish event without at least one active ticket with inventory." });
     }
 
     event.status = "published";
@@ -286,14 +299,73 @@ router.put("/:id/publish", async (req, res) => {
  */
 router.get("/:id", async (req, res) => {
   try {
-    const event = await Event.findById(req.params.id)
-      .populate('createdBy', 'full_name email');
-    
+    const event = await Event.findById(req.params.id).populate("createdBy", "full_name email");
+
     if (!event) {
       return res.status(404).json({ error: "Event not found." });
     }
 
-    res.json({ event });
+    const tickets = await Ticket.find({ eventId: event._id, status: { $ne: "archived" } })
+      .sort({ createdAt: 1 })
+      .lean();
+
+    const mappedTickets = tickets.map((ticket) => ({
+      id: ticket._id.toString(),
+      eventId: ticket.eventId.toString(),
+      name: ticket.name,
+      type: ticket.type,
+      priceCents: ticket.priceCents,
+      price: ticket.priceCents / 100,
+      currency: ticket.currency,
+      feeAbsorb: ticket.feeAbsorb,
+      qtyTotal: ticket.qtyTotal,
+      qtySold: ticket.qtySold,
+      salesStart: ticket.salesStart,
+      salesEnd: ticket.salesEnd,
+      perOrderLimit: ticket.perOrderLimit,
+      status: ticket.status,
+      createdAt: ticket.createdAt,
+      updatedAt: ticket.updatedAt,
+    }));
+
+    const totals = mappedTickets.reduce(
+      (acc, ticket) => {
+        acc.totalQty += ticket.qtyTotal;
+        acc.soldQty += ticket.qtySold;
+        acc.minPrice = Math.min(acc.minPrice, ticket.priceCents);
+        return acc;
+      },
+      { totalQty: 0, soldQty: 0, minPrice: Infinity }
+    );
+
+    const available = Math.max(totals.totalQty - totals.soldQty, 0);
+    const minPrice = totals.minPrice === Infinity ? 0 : totals.minPrice;
+
+    const serializedEvent = {
+      id: event._id.toString(),
+      title: event.title,
+      description: event.description,
+      summary: event.summary,
+      category: event.category || "General",
+      location: event.location,
+      image_url: event.image_url,
+      start_date: event.date
+        ? `${event.date}T${event.startTime || event.time || "00:00:00"}`
+        : new Date().toISOString(),
+      end_date: event.date
+        ? `${event.date}T${event.endTime || event.time || "23:59:59"}`
+        : new Date().toISOString(),
+      status: event.status,
+      organized_by: event.createdBy?.full_name || "Unknown",
+      created_at: event.createdAt,
+      updated_at: event.updatedAt,
+      ticket_price: minPrice / 100,
+      total_tickets: totals.totalQty,
+      available_tickets: available,
+      tickets: mappedTickets,
+    };
+
+    res.json({ event: serializedEvent });
   } catch (error) {
     console.error("Error fetching event:", error);
     res.status(500).json({ error: error.message });
@@ -305,94 +377,116 @@ router.get("/:id", async (req, res) => {
  * Book tickets for an event
  */
 router.post("/:id/bookings", async (req, res) => {
+  const session = await mongoose.startSession();
   try {
-    const { quantity, ticketType } = req.body;
+    const { quantity, ticketType, ticketId } = req.body;
     const eventId = req.params.id;
-    
-    if (!quantity || quantity <= 0) {
+    const qty = Number(quantity);
+    if (!Number.isInteger(qty) || qty <= 0) {
       return res.status(400).json({ error: "Valid ticket quantity is required." });
     }
-
-    // Find the event
-    const event = await Event.findById(eventId);
-    if (!event) {
-      return res.status(404).json({ error: "Event not found." });
-    }
-
-    if (event.status !== "published") {
-      return res.status(400).json({ error: "Event is not available for booking." });
-    }
-
-    // Find the ticket type (default to first ticket if not specified)
-    let selectedTicket = event.tickets && event.tickets.length > 0 ? event.tickets[0] : null;
-    if (ticketType && event.tickets) {
-      selectedTicket = event.tickets.find(ticket => ticket.name === ticketType) || selectedTicket;
-    }
-
-    if (!selectedTicket) {
-      return res.status(400).json({ error: "No tickets available for this event." });
-    }
-
-    // Check availability
-    if (selectedTicket.sold + quantity > selectedTicket.quantity) {
-      return res.status(400).json({ error: "Not enough tickets available." });
-    }
-
-    // Get user ID from authentication (token in header)
     const auth = req.headers.authorization;
-    if (!auth || !auth.startsWith('Bearer ')) {
+    if (!auth || !auth.startsWith("Bearer ")) {
       return res.status(401).json({ error: "Authentication required." });
     }
-
     let userId;
     try {
-      const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
-      const token = auth.split(' ')[1];
+      const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+      const token = auth.split(" ")[1];
       const decoded = jwt.verify(token, JWT_SECRET);
       userId = decoded.userId;
-    } catch (error) {
+    } catch (err) {
       return res.status(401).json({ error: "Invalid authentication token." });
     }
-
-    // Calculate total amount
-    const totalAmount = selectedTicket.price * quantity;
-
-    // Create booking
-    const booking = new Booking({
-      event_id: eventId,
-      user_id: userId,
-      quantity,
-      total_amount: totalAmount,
-      booking_status: "confirmed"
-    });
-
-    await booking.save();
-
-    // Update ticket sold count
-    selectedTicket.sold += quantity;
-    await event.save();
-
-    res.status(201).json({
-      message: "✅ Tickets booked successfully!",
-      booking: {
-        id: booking.id,
-        event_id: booking.event_id,
-        user_id: booking.user_id,
-        quantity: booking.quantity,
-        total_amount: booking.total_amount,
-        booking_status: booking.booking_status,
-        created_at: booking.created_at,
-        updated_at: booking.updated_at
-      },
-      event: {
-        ...event.toObject(),
-        available_tickets: event.tickets ? event.tickets.reduce((total, ticket) => total + (ticket.quantity - ticket.sold), 0) : 0
+    let bookingRecord;
+    let event;
+    await session.withTransaction(async () => {
+      event = await Event.findById(eventId).session(session);
+      if (!event) {
+        throw createHttpError(404, "Event not found.");
       }
+      if (event.status !== "published") {
+        throw createHttpError(400, "Event is not available for booking.");
+      }
+      const ticketQuery = { eventId: event._id, status: "active" };
+      if (ticketId) {
+        ticketQuery._id = ticketId;
+      }
+      if (ticketType) {
+        ticketQuery.name = ticketType;
+      }
+      const ticket = await Ticket.findOne(ticketQuery).sort({ priceCents: 1 }).session(session);
+      if (!ticket) {
+        throw createHttpError(400, "No tickets available for this event.");
+      }
+      const now = new Date();
+      if (ticket.salesStart && now < ticket.salesStart) {
+        throw createHttpError(400, "Ticket sales have not started yet.");
+      }
+      if (ticket.salesEnd && now > ticket.salesEnd) {
+        throw createHttpError(400, "Ticket sales window has closed.");
+      }
+      if (ticket.perOrderLimit && qty > ticket.perOrderLimit) {
+        throw createHttpError(400, `You can purchase up to ${ticket.perOrderLimit} tickets per order.`);
+      }
+      if (ticket.qtySold + qty > ticket.qtyTotal) {
+        throw createHttpError(400, "Not enough tickets available.");
+      }
+      ticket.qtySold += qty;
+      await ticket.save({ session });
+      bookingRecord = new Booking({
+        event_id: event._id,
+        user_id: userId,
+        quantity: qty,
+        total_amount: (ticket.priceCents * qty) / 100,
+        booking_status: "confirmed",
+      });
+      await bookingRecord.save({ session });
+    });
+    const summary = await Ticket.aggregate([
+      { $match: { eventId: event._id, status: { $ne: "archived" } } },
+      {
+        $group: {
+          _id: "$eventId",
+          minPrice: { $min: "$priceCents" },
+          totalQty: { $sum: "$qtyTotal" },
+          soldQty: { $sum: "$qtySold" },
+        },
+      },
+    ]);
+    const stats = summary[0] || { minPrice: 0, totalQty: 0, soldQty: 0 };
+    const available = Math.max((stats.totalQty || 0) - (stats.soldQty || 0), 0);
+    const bookingPayload = typeof bookingRecord.toJSON === "function" ? bookingRecord.toJSON() : bookingRecord.toObject();
+    res.status(201).json({
+      message: "Tickets booked successfully!",
+      booking: bookingPayload,
+      event: {
+        id: event._id.toString(),
+        title: event.title,
+        description: event.description,
+        summary: event.summary,
+        category: event.category || "General",
+        location: event.location,
+        image_url: event.image_url,
+        start_date: event.date
+          ? `${event.date}T${event.startTime || event.time || "00:00:00"}`
+          : new Date().toISOString(),
+        end_date: event.date
+          ? `${event.date}T${event.endTime || event.time || "23:59:59"}`
+          : new Date().toISOString(),
+        ticket_price: (stats.minPrice || 0) / 100,
+        total_tickets: stats.totalQty || 0,
+        available_tickets: available,
+      },
     });
   } catch (error) {
     console.error("Error booking tickets:", error);
-    res.status(500).json({ error: error.message });
+    const status = error.statusCode || 500;
+    res.status(status).json({ error: error.message || "Failed to book tickets." });
+  } finally {
+    session.endSession();
   }
 });
 
 export default router;
+

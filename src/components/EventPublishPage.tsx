@@ -3,6 +3,22 @@ import { useNavigate } from "react-router-dom";
 import StepSidebar from "../components/StepSidebar";
 import { useEventDraft } from "../contexts/EventDraftContext";
 import { Calendar, MapPin, Ticket, Eye } from "lucide-react";
+import type { TicketStatus } from "../lib/types";
+
+interface EventTicket {
+  id: string;
+  name: string;
+  type: string;
+  priceCents: number;
+  price: number;
+  currency: string;
+  qtyTotal: number;
+  qtySold: number;
+  salesStart?: string;
+  salesEnd?: string;
+  perOrderLimit: number;
+  status: TicketStatus;
+}
 
 interface EventData {
   _id: string;
@@ -16,12 +32,10 @@ interface EventData {
   endTime: string;
   location: string;
   status: string;
-  tickets: Array<{
-    name: string;
-    price: number;
-    quantity: number;
-    sold: number;
-  }>;
+  ticket_price: number;
+  total_tickets: number;
+  available_tickets: number;
+  tickets: EventTicket[];
 }
 
 export default function EventPublishPage() {
@@ -114,6 +128,9 @@ export default function EventPublishPage() {
     );
   }
 
+  const activeTickets =
+    eventData?.tickets?.filter((ticket) => ticket.status === "active") ?? [];
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr]">
       <StepSidebar />
@@ -173,22 +190,45 @@ export default function EventPublishPage() {
                   </div>
 
                   {/* Tickets Preview */}
-                  {eventData.tickets && eventData.tickets.length > 0 && (
+                  {activeTickets.length > 0 && (
                     <div className="border-t pt-4">
                       <h4 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
                         <Ticket className="w-5 h-5" />
                         Tickets Available
                       </h4>
                       <div className="space-y-2">
-                        {eventData.tickets.map((ticket, index) => (
-                          <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                        {activeTickets.map((ticket) => (
+                          <div
+                            key={ticket.id}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-gray-50 p-3"
+                          >
                             <div>
                               <div className="font-medium">{ticket.name}</div>
                               <div className="text-sm text-gray-600">
-                                {ticket.quantity - ticket.sold} tickets available
+                                {ticket.qtyTotal - ticket.qtySold} tickets
+                                available • limit {ticket.perOrderLimit} per order
+                              </div>
+                              {(ticket.salesStart || ticket.salesEnd) && (
+                                <div className="text-xs text-gray-500">
+                                  {ticket.salesStart
+                                    ? `Starts ${new Date(ticket.salesStart).toLocaleString()}`
+                                    : "On sale immediately"}
+                                  {" � "}
+                                  {ticket.salesEnd
+                                    ? `Ends ${new Date(ticket.salesEnd).toLocaleString()}`
+                                    : "No end date"}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <div className="font-bold text-lg">
+                                {ticket.currency}{" "}
+                                {(ticket.price ?? ticket.priceCents / 100).toFixed(2)}
+                              </div>
+                              <div className="text-xs uppercase tracking-wide text-gray-500">
+                                {ticket.type}
                               </div>
                             </div>
-                            <div className="font-bold text-lg">${ticket.price.toFixed(2)}</div>
                           </div>
                         ))}
                       </div>
@@ -220,31 +260,42 @@ export default function EventPublishPage() {
               </div>
             )}
 
-            <div className="flex gap-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <button
                 onClick={() => nav(`/create/${draft.id}/tickets`)}
                 className="rounded-lg border border-gray-300 px-6 py-3 font-medium text-gray-700 hover:bg-gray-50"
               >
                 Back to Tickets
               </button>
-              
-              <button
-                onClick={publish}
-                disabled={publishing || !eventData || (eventData.tickets && eventData.tickets.length === 0)}
-                className="rounded-lg bg-green-600 px-6 py-3 font-medium text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
-              >
-                {publishing ? "Publishing..." : "Publish Event"}
-              </button>
+
+              <div className="flex flex-col items-start gap-2 sm:items-end">
+                {activeTickets.length === 0 && (
+                  <p className="text-sm text-red-600">
+                    Add at least one active ticket before publishing.
+                  </p>
+                )}
+                <button
+                  onClick={publish}
+                  disabled={publishing || !eventData || activeTickets.length === 0}
+                  className="rounded-lg bg-green-600 px-6 py-3 font-medium text-white hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {publishing ? "Publishing..." : "Publish Event"}
+                </button>
+              </div>
             </div>
 
-            {eventData && eventData.tickets && eventData.tickets.length === 0 && (
+            {activeTickets.length === 0 && (
               <p className="mt-3 text-sm text-red-600">
-                ⚠️ You need to add tickets before publishing the event.
+                Add at least one active ticket before publishing the event.
               </p>
             )}
+
           </section>
         </div>
       </main>
     </div>
   );
 }
+
+
+

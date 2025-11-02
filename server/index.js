@@ -4,6 +4,8 @@ import dotenv from 'dotenv';
 import { connectDB } from './config/db.js';
 import authRoutes from './routes/auth.js';
 import eventRoutes from './routes/events.js';
+import ticketRoutes from './routes/tickets.js';
+import cartRoutes from './routes/cart.js';
 
 dotenv.config();
 
@@ -17,6 +19,8 @@ connectDB();
 
 app.use('/api/auth', authRoutes);
 app.use('/api/events', eventRoutes);
+app.use('/api', ticketRoutes);
+app.use('/api', cartRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });

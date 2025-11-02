@@ -1,13 +1,8 @@
 import { Calendar, MapPin, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from "react-router-dom";
-
-
-
-
 
 interface HeaderProps {
-  onAuthClick: () => void;
+  onAuthClick: (afterAuthAction?: () => void) => void;
   onCreateEventClick: () => void;
   searchQuery: string;
   onSearchChange: (value: string) => void;
@@ -29,11 +24,8 @@ export function Header({
 
   const handleCreateEventClick = () => {
     if (user) onCreateEventClick();
-    else onAuthClick();
+    else onAuthClick(onCreateEventClick);
   };
-
-
-  const nav = useNavigate();
 
   return (
     <header className="bg-white shadow-sm sticky top-0 z-50">
@@ -88,8 +80,8 @@ export function Header({
               Find Events
             </button>
 
-           <button
-              onClick={() => nav("/create/select")}
+            <button
+              onClick={handleCreateEventClick}
               className="text-gray-700 hover:text-orange-600 transition-colors font-medium"
             >
               Create Events
@@ -114,13 +106,13 @@ export function Header({
             ) : (
               <>
                 <button
-                  onClick={onAuthClick}
+                  onClick={() => onAuthClick()}
                   className="text-gray-700 hover:text-orange-600 transition-colors font-medium"
                 >
                   Log In
                 </button>
                 <button
-                  onClick={onAuthClick}
+                  onClick={() => onAuthClick()}
                   className="text-gray-700 hover:text-orange-600 transition-colors font-medium"
                 >
                   Sign Up

@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json",
     "server": "nodemon server/index.js",
     "server:build": "tsc -p server/tsconfig.json",
-    "server:start": "node server/dist/index.js"
+    "server:start": "node server/dist/index.js",
+    "start": "node server/index.js"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
@@ -19,11 +20,13 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
+    "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.344.0",
     "mongoose": "^8.19.1",
     "openai": "^6.6.0",
     "quill": "^2.0.3",
+    "razorpay": "^2.9.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-quill": "^2.0.0",

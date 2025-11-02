@@ -45,7 +45,7 @@ function Protected({ children }: { children: React.ReactNode }) {
 
 /* ------------- Header wrapper so we can use navigate inside Router -------- */
 function HeaderWithNav(props: {
-  onAuthClick: () => void;
+  onAuthClick: (afterAuthAction?: () => void) => void;
   searchQuery: string;
   onSearchChange: (v: string) => void;
   location: string;
@@ -68,7 +68,7 @@ function HeaderWithNav(props: {
 
 /* --------------------------------- App ----------------------------------- */
 function AppContent() {
-  const { loading: authLoading } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [location, setLocation] = useState("Hyderabad");
@@ -76,6 +76,7 @@ function AppContent() {
   const [events, setEvents] = useState<Event[]>([]);
   const [filteredEvents, setFilteredEvents] = useState<Event[]>([]);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [postAuthAction, setPostAuthAction] = useState<(() => void) | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -146,6 +147,29 @@ function AppContent() {
     searchEvents();
   };
 
+  useEffect(() => {
+    if (!isAuthModalOpen && user && postAuthAction) {
+      postAuthAction();
+      setPostAuthAction(null);
+    }
+  }, [isAuthModalOpen, postAuthAction, user]);
+
+  const handleAuthClick = (afterAuthAction?: () => void) => {
+    if (afterAuthAction) {
+      setPostAuthAction(() => afterAuthAction);
+    } else {
+      setPostAuthAction(null);
+    }
+    setIsAuthModalOpen(true);
+  };
+
+  const handleCloseAuthModal = () => {
+    setIsAuthModalOpen(false);
+    if (!user) {
+      setPostAuthAction(null);
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -161,7 +185,7 @@ function AppContent() {
     <Router>
       <div className="min-h-screen bg-gray-50">
         <HeaderWithNav
-          onAuthClick={() => setIsAuthModalOpen(true)}
+          onAuthClick={handleAuthClick}
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
           location={location}
@@ -246,10 +270,7 @@ function AppContent() {
         </Routes>
 
         {/* Global modals */}
-        <AuthModal
-          isOpen={isAuthModalOpen}
-          onClose={() => setIsAuthModalOpen(false)}
-        />
+        <AuthModal isOpen={isAuthModalOpen} onClose={handleCloseAuthModal} />
         <EventDetailModal
           event={selectedEvent}
           onClose={() => setSelectedEvent(null)}

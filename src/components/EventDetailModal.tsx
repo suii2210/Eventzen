@@ -30,6 +30,8 @@ export function EventDetailModal({ event, onClose }: EventDetailModalProps) {
 
   if (!event) return null;
 
+  const currency = event.ticket_currency ?? "USD";
+
   const handleBooking = async () => {
     if (!user) {
       alert('Please sign in to book tickets');
@@ -150,10 +152,10 @@ export function EventDetailModal({ event, onClose }: EventDetailModalProps) {
               <div className="border-t border-gray-200 pt-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <div className="text-sm text-gray-600 mb-1">Price per ticket</div>
-                    <div className="text-3xl font-bold text-gray-900">
-                      ${event.ticket_price.toFixed(2)}
-                    </div>
+                <div className="text-sm text-gray-600 mb-1">Price per ticket</div>
+                <div className="text-3xl font-bold text-gray-900">
+                  {currency} {event.ticket_price.toFixed(2)}
+                </div>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -170,10 +172,10 @@ export function EventDetailModal({ event, onClose }: EventDetailModalProps) {
                 </div>
 
                 <div className="flex items-center justify-between mb-4">
-                  <span className="text-lg font-medium text-gray-700">Total</span>
-                  <span className="text-2xl font-bold text-gray-900">
-                    ${(event.ticket_price * quantity).toFixed(2)}
-                  </span>
+                <span className="text-lg font-medium text-gray-700">Total</span>
+                <span className="text-2xl font-bold text-gray-900">
+                  {currency} {(event.ticket_price * quantity).toFixed(2)}
+                </span>
                 </div>
 
                 <button
